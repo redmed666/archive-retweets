@@ -14,7 +14,11 @@ const userTweetsApi = `https://api.twitter.com/2/users/${userId}/tweets`;
 // export BEARER_TOKEN='YOUR-TOKEN'
 const bearerToken = process.env.BEARER_TOKEN;
 const maxResults = 100;
-const tags = ["XSS", "Recon", "Infosec", "IDA", "Ghidra", "Reverse", "Javascript", "Exploitation", "Binary", "CVE", "ARM", "Qemu", "Hack", "Malware", "Bug", "FPGA", "Forensics", "CTF", "Pentest", "Penetration", "iOS", "MacOS", "Python", "Windows", "Linux", "Hunt", "C++", "Golang", "Rust", "Mimikatz", "GIT", "Book", "Machine Learning", "LSASS", "Protection", "Bypass", "Dump", "Pass-The-Hash", "Kerberos", "VBA", "VX-Underground", "Tool", "Lazarus", "APT29", "Turla", "APT28", "Web App", "Race Condition", "Tuto", "Browser", "Backdoor", "Docker", "DevOps",]
+const tags = ["XSS", "Recon", "Infosec", "IDA", "Ghidra", "Reverse", "Javascript", "Exploitation", "Binary", "CVE", "ARM", "Qemu", "Hack", "Malware", "Bug", "FPGA", "Forensics", "CTF", "Pentest", "Penetration", "iOS", "MacOS", "Python", "Windows", "Linux", "Hunt", "C++", "Golang", "Rust", "Mimikatz", "GIT", "Book", "Machine Learning", "LSASS", "Protection", "Bypass", "Dump", "Pass-The-Hash", "Kerberos", "VBA", "VX-Underground", "Tool", "Lazarus", "APT29", "Turla", "APT28", "Web App", "Race Condition", "Tuto", "Browser", "Backdoor", "Docker", "DevOps", "Nuclei", "Collection"]
+
+function sleep(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
 
 const getUserRetweets = async () => {
   let userTweets = [];
@@ -104,7 +108,7 @@ const createDB = async () => {
 const createTable = async (db) => {
   db.serialize(() => {
     // Queries scheduled here will be serialized.
-    db.run('CREATE TABLE IF NOT EXISTS retweets(id INTEGER, message TEXT, created_at DATETIME, author TEXT, urls TEXT, tags TEXT)');
+    db.run('CREATE TABLE IF NOT EXISTS retweets(id INTEGER PRIMARY KEY, message TEXT, created_at DATETIME, author_id TEXT, username TEXT, urls TEXT, tags TEXT)');
   });
 }
 
@@ -129,8 +133,7 @@ const getUsernameFromID = async (id) => {
       console.log(`${resp.statusCode} ${resp.statusMessage}:\n${resp.body}`);
       return;
     }
-    console.log(resp.body);
-    return resp.body;
+    return resp.body.data.username;
   } catch (err) {
     throw new Error(`Request failed: ${err}`);
   }
@@ -148,9 +151,29 @@ const getTagsFromText = (text) => {
   return tagsFound;
 }
 
+const checkIfIdExists = async (db, id) => {
+  let sql = `select exists(select 1 from retweets where id=?) limit 1`;
+  const res = db.all(sql, [id], (err, row) => {
+    if (err) {
+      return console.log(err.message);
+    }
+    return row;
+  });
+  return res;
+}
+
 const insertRTInDB = async (db, retweet) => {
   // use a lot of API calls
-  //const username = getUsernameFromID(retweet.author_id);
+  const idPresent = await checkIfIdExists(db, retweet.id);
+  console.log("IDPRESENT");
+  console.log(idPresent);
+  if (idPresent === 1) {
+    console.log("Already there");
+    return;
+  }
+  const username = await getUsernameFromID(retweet.author_id);
+  //const username = retweet.author_id;
+
   let urls = "";
   if (retweet.entities) {
     if (retweet.entities.urls) {
@@ -161,13 +184,15 @@ const insertRTInDB = async (db, retweet) => {
         });
       } else {
         urls = urls.concat(retweet.entities.urls.expanded_url);
+        urls = urls.concat(",")
       }
     }
   }
 
   const tagsFound = await getTagsFromText(retweet.text);
 
-  db.run(`INSERT INTO retweets(id, message, created_at, author, urls, tags) VALUES(?, ?, ?, ?, ?, ?)`, [retweet.id, retweet.text, retweet.created_at, retweet.author_id, urls, tagsFound], function (err) {
+
+  db.run(`INSERT INTO retweets(id, message, created_at, author_id, username, urls, tags) VALUES(?, ?, ?, ?, ?, ?, ?)`, [retweet.id, retweet.text, retweet.created_at, retweet.author_id, username, urls, tagsFound], function (err) {
     if (err) {
       return console.log(err.message);
     }
@@ -189,6 +214,7 @@ const main = async () => {
   console.log("[*] Inserting tweets in table");
   for (const rt of userRetweets) {
     await insertRTInDB(db, rt);
+    await sleep(2000);
   };
 
   db.close();
